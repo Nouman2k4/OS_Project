@@ -28,6 +28,7 @@ struct collisionThreadArgs{
     int& pacmanX;
     int& pacmanY;
     int (*maze)[32];
+    int& lives;
 };
 
 void drawMaze(sf::RenderWindow& window, int maze[29][32], sf::RectangleShape& wall, sf::CircleShape& food, sf::Sprite (&cherry)[3]) {
@@ -106,12 +107,16 @@ void* checkCollision(void* arg) {
     int& enemyY = args->enemyY;
     int& pacmanX = args->pacmanX;
     int& pacmanY = args->pacmanY;
+    int& lives =args->lives;
     int (*maze)[32] = args->maze;
 
     while (true) {
         mtx.lock();
 
-        if (maze[pacmanY][pacmanX] == maze[enemyY][enemyX]) {
+        if (pacmanX==enemyX&&pacmanY==enemyY) {
+            pacmanX=1;
+            pacmanY=1;
+            lives--;
             pacman.setPosition(pacmanX * 20.f + 6.f, pacmanY * 20.f + 5.f);
         }
 
@@ -246,7 +251,7 @@ int main() {
 
 
     sf::FloatRect redbounds = redsprite.getLocalBounds(), bluebounds = bluesprite.getLocalBounds(), 
-                  pinkbounds = pinksprite.getLocalBounds(), greenbounds = greensprite.getLocalBounds();
+    pinkbounds = pinksprite.getLocalBounds(), greenbounds = greensprite.getLocalBounds();
 
     redsprite.setOrigin(redbounds.width / 3.f, redbounds.height / 3.f);
     bluesprite.setOrigin(bluebounds.width / 3.f, bluebounds.height / 3.f);
@@ -289,7 +294,7 @@ int main() {
 
     int pacmanX = 1;
     int pacmanY = 1;
-    int score = 0;
+    int score = 0,lives=3;
 
     int enemyX1 = 10, enemyY1 = 10;
     int enemyX2 = 20, enemyY2 = 10;
@@ -298,9 +303,13 @@ int main() {
 
     pthread_t player_id, Score_id;
     pthread_t t_id1, t_id2, t_id3, t_id4;
-    //pthread_t collision_id1, collision_id2, collision_id3, collision_id4;
+    pthread_t collision_id1, collision_id2, collision_id3, collision_id4;
 
     PlayerThreadArgs playerArgs = {pacmanX, pacmanY, maze, score};
+    collisionThreadArgs collisionArgs1 = {pacmanSprite, enemyX1, enemyY1, pacmanX, pacmanY, maze,lives};
+    collisionThreadArgs collisionArgs2 = {pacmanSprite, enemyX2, enemyY2, pacmanX, pacmanY, maze,lives};
+    collisionThreadArgs collisionArgs3 = {pacmanSprite, enemyX3, enemyY3, pacmanX, pacmanY, maze,lives};
+    collisionThreadArgs collisionArgs4 = {pacmanSprite, enemyX4, enemyY4, pacmanX, pacmanY, maze,lives};
 
     pthread_create(&player_id, NULL, movePlayer, &playerArgs);
 
@@ -316,19 +325,13 @@ int main() {
     pthread_create(&t_id3, NULL, moveEnemy, &enemyArgs3);
     pthread_create(&t_id4, NULL, moveEnemy, &enemyArgs4);
 
-    //collisionThreadArgs collisionArgs1 = {pacmanSprite, enemyX1, enemyY1, pacmanX, pacmanY, maze};
-    //collisionThreadArgs collisionArgs2 = {pacmanSprite, enemyX2, enemyY2, pacmanX, pacmanY, maze};
-    //collisionThreadArgs collisionArgs3 = {pacmanSprite, enemyX3, enemyY3, pacmanX, pacmanY, maze};
-    //collisionThreadArgs collisionArgs4 = {pacmanSprite, enemyX4, enemyY4, pacmanX, pacmanY, maze};
-//
-    //pthread_create(&collision_id1, NULL, checkCollision, &collisionArgs1);
-    //pthread_create(&collision_id2, NULL, checkCollision, &collisionArgs2);
-    //pthread_create(&collision_id3, NULL, checkCollision, &collisionArgs3);
-    //pthread_create(&collision_id4, NULL, checkCollision, &collisionArgs4);
 
-    pthread_t collision_id1;
-    collisionThreadArgs collisionArgs1 = {pacmanSprite, enemyX1, enemyY1, pacmanX, pacmanY, maze};
+
     pthread_create(&collision_id1, NULL, checkCollision, &collisionArgs1);
+    pthread_create(&collision_id2, NULL, checkCollision, &collisionArgs2);
+    pthread_create(&collision_id3, NULL, checkCollision, &collisionArgs3);
+    pthread_create(&collision_id4, NULL, checkCollision, &collisionArgs4);
+
 
     while (window.isOpen()) {
 
@@ -337,7 +340,8 @@ int main() {
             if (event.type == sf::Event::Closed)
                 window.close();
         }
-
+        if(lives==0)
+        window.close();
         drawMaze(window, maze, wall, food, cherrysprite);
 
         drawPlayer(window, pacmanSprite, pacmanX, pacmanY);
@@ -357,9 +361,17 @@ int main() {
         text.setString("Score: " + std::to_string(score));
         text.setCharacterSize(24);
         text.setFillColor(sf::Color::White);
-        text.setPosition(10.f, 600.f);
+        text.setPosition(10.f, 590.f);
         window.draw(text);
-
+        
+        sf::Text text1;
+        text1.setFont(font);
+        text1.setString("Lives : " + std::to_string(lives));
+        text1.setCharacterSize(24);
+        text1.setFillColor(sf::Color::White);
+        text1.setPosition(10.f, 610.f);
+        window.draw(text1);
+        
         window.display();
     }
     
