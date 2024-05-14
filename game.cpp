@@ -2,11 +2,15 @@
 #include <SFML/Window.hpp>
 #include <thread>
 #include <mutex>
-#include <chrono>
 #include <cstdlib>
 #include <ctime>
+#include<semaphore.h>
 
 std::mutex mtx;
+sem_t enemySem;
+bool ifcherry = false;
+bool eatghost = false;
+float eatTime = 0;
 
 struct EnemyThreadArgs {
     int& enemyX;
@@ -23,14 +27,16 @@ struct PlayerThreadArgs {
 
 struct collisionThreadArgs{
     sf::Sprite& pacman;
+    sf::Sprite& enemy;
     int& enemyX;
     int& enemyY;
     int& pacmanX;
     int& pacmanY;
     int (*maze)[32];
+    int& lives;
 };
 
-void drawMaze(sf::RenderWindow& window, int maze[29][32], sf::RectangleShape& wall, sf::CircleShape& food, sf::Sprite (&cherry)[3]) {
+void drawMaze(sf::RenderWindow& window, int maze[29][32], sf::RectangleShape& wall, sf::CircleShape& food, sf::Sprite (&cherry)[4]) {
     mtx.lock();
     window.clear(sf::Color::Black);
 
@@ -102,17 +108,29 @@ void* checkCollision(void* arg) {
     collisionThreadArgs* args = static_cast<collisionThreadArgs*>(arg);
 
     sf::Sprite& pacman = args->pacman;
+    sf::Sprite& enemy = args->enemy;
     int& enemyX = args->enemyX;
     int& enemyY = args->enemyY;
     int& pacmanX = args->pacmanX;
     int& pacmanY = args->pacmanY;
+    int& lives =args->lives;
     int (*maze)[32] = args->maze;
 
     while (true) {
         mtx.lock();
 
-        if (maze[pacmanY][pacmanX] == maze[enemyY][enemyX]) {
-            pacman.setPosition(pacmanX * 20.f + 6.f, pacmanY * 20.f + 5.f);
+        if (pacmanX==enemyX&&pacmanY==enemyY) {
+            if(eatghost){
+                enemyX = 16;
+                enemyY = 14;
+                enemy.setPosition(enemyX * 20.f + 6.f, enemyY * 20.f + 5.f);
+            }
+            else{
+                pacmanX=1;
+                pacmanY=1;
+                lives--;
+                pacman.setPosition(pacmanX * 20.f + 6.f, pacmanY * 20.f + 5.f);
+            }
         }
 
         mtx.unlock();
@@ -136,8 +154,9 @@ void* updateScore(void* arg){
             maze[pacmanY][pacmanX]=1;
         }
         else if(maze[pacmanY][pacmanX]==3){
-            score+=10;
             maze[pacmanY][pacmanX]=1;
+            score+=10;
+            ifcherry=true;
         }
 
         mtx.unlock();
@@ -164,8 +183,8 @@ void* moveEnemy(void* arg) {
     int direction=0;
 
     while (true) {
-        mtx.lock();
-        
+        sem_wait(&enemySem);
+        int move=rand()%4;
         bool canMoveUp = (enemyY > 0 && maze[enemyY - 1][enemyX] != 0);
         bool canMoveDown = (enemyY < 28 && maze[enemyY + 1][enemyX] != 0);
         bool canMoveLeft = (enemyX > 0 && maze[enemyY][enemyX - 1] != 0);
@@ -188,15 +207,18 @@ void* moveEnemy(void* arg) {
                      (direction == 3 && !canMoveRight));
         }
         
-        mtx.unlock();
+        sem_post(&enemySem);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
     return nullptr;
 }
 
-int main() {
-    sf::RenderWindow window(sf::VideoMode(640, 640), "Complex SFML Maze");
+void* GameEngine(void* arg)
+{
+  sf::RenderWindow window(sf::VideoMode(640, 640), "Complex SFML Maze");
+
+    sf::Clock clock;
 
     sf::Color wallColor = sf::Color::Blue;
     sf::Color bgColor = sf::Color::Black;
@@ -211,8 +233,12 @@ int main() {
 
     sf::Texture pacmanTexture;
     if (!pacmanTexture.loadFromFile("pacman.png")) {
-        return EXIT_FAILURE;
+        return nullptr;
     }
+    sf::Font font;
+            if (!font.loadFromFile("times new roman.ttf")) {
+                return nullptr;
+            }
 
     sf::Sprite pacmanSprite(pacmanTexture);
     pacmanSprite.setScale(0.02f, 0.02f);
@@ -220,15 +246,16 @@ int main() {
     sf::FloatRect bounds = pacmanSprite.getLocalBounds();
     pacmanSprite.setOrigin(bounds.width / 3.f, bounds.height / 3.f);
 
-    sf::Texture redghost, blueghost, pinkghost, greenghost, cherry;
+    sf::Texture redghost, blueghost, pinkghost, greenghost, eatenGhost, cherry;
     redghost.loadFromFile("ghost1.png");
     blueghost.loadFromFile("ghost3.png");
     pinkghost.loadFromFile("ghost4.png");
     greenghost.loadFromFile("ghost2.png");
+    eatenGhost.loadFromFile("eatenghost.png");
     cherry.loadFromFile("cherry.png");
 
-    sf::Sprite cherrysprite[3];
-    for(int i=0 ; i<3 ; i++){
+    sf::Sprite cherrysprite[4];
+    for(int i=0 ; i<4; i++){
         
         cherrysprite[i].setTexture(cherry);
         cherrysprite[i].setScale(0.04f, 0.04f);
@@ -239,14 +266,14 @@ int main() {
     }
 
     sf::Sprite redsprite(redghost), bluesprite(blueghost), pinksprite(pinkghost), greensprite(greenghost);
-    redsprite.setScale(0.03f, 0.03f);
-    bluesprite.setScale(0.01f, 0.01f);
+    redsprite.setScale(0.04f, 0.04f);
+    bluesprite.setScale(0.04f, 0.04f);
     pinksprite.setScale(0.04f, 0.04f);
     greensprite.setScale(0.04f, 0.04f);
 
 
     sf::FloatRect redbounds = redsprite.getLocalBounds(), bluebounds = bluesprite.getLocalBounds(), 
-                  pinkbounds = pinksprite.getLocalBounds(), greenbounds = greensprite.getLocalBounds();
+    pinkbounds = pinksprite.getLocalBounds(), greenbounds = greensprite.getLocalBounds();
 
     redsprite.setOrigin(redbounds.width / 3.f, redbounds.height / 3.f);
     bluesprite.setOrigin(bluebounds.width / 3.f, bluebounds.height / 3.f);
@@ -261,22 +288,22 @@ int main() {
         {0,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,2,2,2,2,2,2,2,2,3,2,2,2,0},
         {0,2,0,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,0,0,2,0},
         {0,2,0,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,0,0,2,0},
-        {0,2,0,0,2,2,2,2,2,2,0,0,2,2,2,2,0,0,0,2,2,2,2,2,2,2,2,2,2,0,2,0},
-        {0,2,0,0,2,0,0,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,2,0},
-        {0,2,0,0,2,0,0,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,2,0},  
-        {0,2,0,0,2,0,0,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,2,0},
-        {0,2,0,0,2,0,0,0,0,3,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,2,0},
-        {2,2,2,2,2,2,2,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,2,2,2},
-        {0,0,0,0,0,0,2,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,0},
-        {0,0,0,0,0,0,2,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,0},
-        {0,2,2,2,2,2,2,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,2,2,2},
-        {0,2,0,0,0,0,2,0,0,2,0,0,2,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,2},
-        {0,2,2,2,0,0,2,2,2,2,0,0,2,0,0,2,0,0,0,2,2,2,2,0,0,0,0,0,2,0,0,2},
-        {0,0,0,2,0,0,2,0,0,2,2,2,2,2,2,2,0,0,0,2,0,0,2,2,2,2,2,2,2,0,0,2},
-        {0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,2},
-        {0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,2},
-        {0,0,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2},        
-        {0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,2,0,0,0},
+        {0,2,0,0,2,2,2,2,2,2,0,0,2,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,2,0,2,0},
+        {0,2,0,0,2,0,0,0,0,2,0,0,2,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,2,0,2,0},
+        {0,2,0,0,2,0,0,0,0,2,0,0,2,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,2,0,2,0},  
+        {0,2,0,0,2,0,0,0,0,2,0,0,2,2,2,2,2,2,2,2,0,0,2,0,0,0,0,0,2,0,2,0},
+        {0,2,0,0,2,0,0,0,0,3,0,0,2,0,0,2,2,0,0,2,0,0,2,0,0,0,0,0,2,0,2,0},
+        {2,2,2,2,2,2,2,0,0,2,0,0,2,0,2,2,2,2,0,2,0,0,2,0,0,0,0,0,2,2,2,2},
+        {0,0,0,0,0,0,2,0,0,3,0,0,2,0,2,2,2,2,0,2,0,0,2,0,0,0,0,0,2,0,0,0},
+        {0,0,0,0,0,0,2,0,0,2,0,0,2,0,0,2,2,0,0,2,0,0,2,0,0,0,0,0,2,0,0,0},
+        {0,2,2,2,2,2,2,0,0,2,0,0,2,2,2,2,2,2,2,2,0,0,2,0,0,0,0,0,2,2,2,2},
+        {0,2,0,0,0,0,2,0,0,2,0,0,2,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,2},
+        {0,2,2,2,0,0,2,2,2,2,0,0,2,0,0,0,0,0,0,2,2,2,2,0,0,0,0,0,2,0,0,2},
+        {0,0,0,2,0,0,2,0,0,2,2,2,2,0,0,0,0,0,0,2,0,0,2,2,2,2,2,2,2,0,0,2},
+        {0,0,0,2,0,0,2,0,0,2,0,0,2,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,2},
+        {0,0,0,2,0,0,2,0,0,2,0,0,2,0,0,0,0,0,0,2,0,0,2,0,0,0,0,0,2,0,0,2},
+        {0,0,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2},        
+        {0,0,0,3,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,2,0,0,0},
         {0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,2,0,0,0},
         {2,2,2,2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,2,2,2,2},
         {0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,2,0,0,0},        
@@ -290,6 +317,7 @@ int main() {
     int pacmanX = 1;
     int pacmanY = 1;
     int score = 0;
+    int lives = 3;
 
     int enemyX1 = 10, enemyY1 = 10;
     int enemyX2 = 20, enemyY2 = 10;
@@ -298,9 +326,14 @@ int main() {
 
     pthread_t player_id, Score_id;
     pthread_t t_id1, t_id2, t_id3, t_id4;
-    //pthread_t collision_id1, collision_id2, collision_id3, collision_id4;
-
+    pthread_t collision_id1, collision_id2, collision_id3, collision_id4;
+    
+    sem_init(&enemySem, 0, 6);
     PlayerThreadArgs playerArgs = {pacmanX, pacmanY, maze, score};
+    collisionThreadArgs collisionArgs1 = {pacmanSprite, redsprite, enemyX1, enemyY1, pacmanX, pacmanY, maze,lives};
+    collisionThreadArgs collisionArgs2 = {pacmanSprite, bluesprite, enemyX2, enemyY2, pacmanX, pacmanY, maze,lives};
+    collisionThreadArgs collisionArgs3 = {pacmanSprite, pinksprite, enemyX3, enemyY3, pacmanX, pacmanY, maze,lives};
+    collisionThreadArgs collisionArgs4 = {pacmanSprite, greensprite, enemyX4, enemyY4, pacmanX, pacmanY, maze,lives};
 
     pthread_create(&player_id, NULL, movePlayer, &playerArgs);
 
@@ -312,23 +345,72 @@ int main() {
     EnemyThreadArgs enemyArgs4 = {enemyX4, enemyY4, maze};
 
     pthread_create(&t_id1, NULL, moveEnemy, &enemyArgs1);
+    pthread_detach(t_id1);
     pthread_create(&t_id2, NULL, moveEnemy, &enemyArgs2);
+    pthread_detach(t_id2);
     pthread_create(&t_id3, NULL, moveEnemy, &enemyArgs3);
+    pthread_detach(t_id3);
     pthread_create(&t_id4, NULL, moveEnemy, &enemyArgs4);
+    pthread_detach(t_id4);
 
-    //collisionThreadArgs collisionArgs1 = {pacmanSprite, enemyX1, enemyY1, pacmanX, pacmanY, maze};
-    //collisionThreadArgs collisionArgs2 = {pacmanSprite, enemyX2, enemyY2, pacmanX, pacmanY, maze};
-    //collisionThreadArgs collisionArgs3 = {pacmanSprite, enemyX3, enemyY3, pacmanX, pacmanY, maze};
-    //collisionThreadArgs collisionArgs4 = {pacmanSprite, enemyX4, enemyY4, pacmanX, pacmanY, maze};
-//
-    //pthread_create(&collision_id1, NULL, checkCollision, &collisionArgs1);
-    //pthread_create(&collision_id2, NULL, checkCollision, &collisionArgs2);
-    //pthread_create(&collision_id3, NULL, checkCollision, &collisionArgs3);
-    //pthread_create(&collision_id4, NULL, checkCollision, &collisionArgs4);
 
-    pthread_t collision_id1;
-    collisionThreadArgs collisionArgs1 = {pacmanSprite, enemyX1, enemyY1, pacmanX, pacmanY, maze};
     pthread_create(&collision_id1, NULL, checkCollision, &collisionArgs1);
+    pthread_detach(collision_id1);
+    pthread_create(&collision_id2, NULL, checkCollision, &collisionArgs2);
+    pthread_detach(collision_id2);
+    pthread_create(&collision_id3, NULL, checkCollision, &collisionArgs3);
+    pthread_detach(collision_id2);
+    pthread_create(&collision_id4, NULL, checkCollision, &collisionArgs4);
+    pthread_detach(collision_id2);
+    
+    sf::Texture backgroundTexture;
+    if (!backgroundTexture.loadFromFile("TitleScreen.jpeg")) {
+        return nullptr;
+    }
+  
+    // Create sprite for the background image
+    sf::Sprite backgroundSprite(backgroundTexture);
+    backgroundSprite.setScale(
+        static_cast<float>(window.getSize().x) / backgroundSprite.getLocalBounds().width,
+        static_cast<float>(window.getSize().y) / backgroundSprite.getLocalBounds().height
+    );
+    
+    sf::Text menuText;
+    menuText.setFont(font);
+    menuText.setString("Press Enter to Start");
+    menuText.setCharacterSize(24);
+    menuText.setFillColor(sf::Color::White);
+    menuText.setPosition(200.f, 300.f);
+    bool gameStarted = false;
+    
+    sf::Text menuText1;
+    menuText.setFont(font);
+    menuText.setString("Press M to view the menu");
+    menuText.setCharacterSize(24);
+    menuText.setFillColor(sf::Color::White);
+    menuText.setPosition(200.f, 400.f);
+    bool menu = false;
+    
+    sf::Text menuText2;
+    menuText.setFont(font);
+    menuText.setString("use Arrow Keys for Movement");
+    menuText.setCharacterSize(24);
+    menuText.setFillColor(sf::Color::White);
+    menuText.setPosition(200.f, 200.f);
+    
+    sf::Text menuText3;
+    menuText.setFont(font);
+    menuText.setString("Press P to pause the game");
+    menuText.setCharacterSize(24);
+    menuText.setFillColor(sf::Color::White);
+    menuText.setPosition(200.f, 300.f);
+    
+    sf::Text menuText4;
+    menuText.setFont(font);
+    menuText.setString("Press Esc to exit the game");
+    menuText.setCharacterSize(24);
+    menuText.setFillColor(sf::Color::White);
+    menuText.setPosition(200.f, 500.f);
 
     while (window.isOpen()) {
 
@@ -336,32 +418,109 @@ int main() {
         while (window.pollEvent(event)) {
             if (event.type == sf::Event::Closed)
                 window.close();
+            if (event.type == sf::Event::KeyPressed) {
+                if (event.key.code == sf::Keyboard::Enter) {
+                    gameStarted = true;
+                }
+                if (event.key.code == sf::Keyboard::M) {
+                    menu= true;
+                }
+                if (event.key.code == sf::Keyboard::E) {
+                    window.close();
+                }
+            }
         }
+            if (gameStarted) {
+            if(lives==0)
+            window.close();
+            drawMaze(window, maze, wall, food, cherrysprite);
 
-        drawMaze(window, maze, wall, food, cherrysprite);
+            if(ifcherry){
+                ifcherry=false;
+                eatghost=true;
+                eatTime=clock.getElapsedTime().asSeconds() + 5;
+                redsprite.setScale(0.05f, 0.05f);
+                redsprite.setTexture(eatenGhost);
+                bluesprite.setScale(0.05f, 0.05f);
+                bluesprite.setTexture(eatenGhost);
+                pinksprite.setScale(0.05f, 0.05f);
+                pinksprite.setTexture(eatenGhost);
+                greensprite.setScale(0.05f, 0.05f);
+                greensprite.setTexture(eatenGhost);
+            }
 
-        drawPlayer(window, pacmanSprite, pacmanX, pacmanY);
+            if(eatghost && clock.getElapsedTime().asSeconds()>=eatTime){
+                eatghost=false;
+                redsprite.setScale(0.03f, 0.03f);
+                redsprite.setTexture(redghost);
+                bluesprite.setScale(0.03f, 0.03f);
+                bluesprite.setTexture(blueghost);
+                pinksprite.setScale(0.03f, 0.03f);
+                pinksprite.setTexture(pinkghost);
+                greensprite.setScale(0.03f, 0.03f);
+                greensprite.setTexture(greenghost);
+            }
+            drawPlayer(window, pacmanSprite, pacmanX, pacmanY);
 
-        drawEnemy(window, redsprite, enemyX1, enemyY1);
-        drawEnemy(window, bluesprite, enemyX2, enemyY2);
-        drawEnemy(window, pinksprite, enemyX3, enemyY3);
-        drawEnemy(window, greensprite, enemyX4, enemyY4);
+            drawEnemy(window, redsprite, enemyX1, enemyY1);
+            drawEnemy(window, bluesprite, enemyX2, enemyY2);
+            drawEnemy(window, pinksprite, enemyX3, enemyY3);
+            drawEnemy(window, greensprite, enemyX4, enemyY4);
 
-        sf::Font font;
-        if (!font.loadFromFile("times new roman.ttf")) {
-            return EXIT_FAILURE;
+            
+
+            
+
+            sf::Text text;
+            text.setFont(font);
+            text.setString("Score: " + std::to_string(score));
+            text.setCharacterSize(24);
+            text.setFillColor(sf::Color::White);
+            text.setPosition(10.f, 590.f);
+            window.draw(text);
+            
+            sf::Text text1;
+            text1.setFont(font);
+            text1.setString("Lives : " + std::to_string(lives));
+            text1.setCharacterSize(24);
+            text1.setFillColor(sf::Color::White);
+            text1.setPosition(10.f, 610.f);
+            window.draw(text1);
+            
+            window.display();
+          }
+          else if(menu)
+          {
+            window.clear(sf::Color::Black);
+           
+            window.draw(menuText2);
+            window.draw(menuText3);
+            window.draw(menuText4);
+
+            window.display();
+          }
+          else {
+            window.clear(sf::Color::Black);
+
+            // Draw background image
+            window.draw(backgroundSprite);
+
+            // Draw menu text
+            window.draw(menuText);
+            window.draw(menuText1);
+            window.display();
         }
-
-        sf::Text text;
-        text.setFont(font);
-        text.setString("Score: " + std::to_string(score));
-        text.setCharacterSize(24);
-        text.setFillColor(sf::Color::White);
-        text.setPosition(10.f, 600.f);
-        window.draw(text);
-
-        window.display();
     }
     
-    return 0;
+    return nullptr;
+}
+
+int main() 
+{
+        pthread_t GAMEid;
+        pthread_create(&GAMEid, NULL, GameEngine,NULL);
+        void* result;
+        pthread_join(GAMEid, &result);
+
+        return 0;
 }
