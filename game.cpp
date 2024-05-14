@@ -19,6 +19,11 @@ int enemySpeed = 0;
 
 bool ifcherry = false;
 bool eatghost = false;
+
+float boostTime[4];
+bool ifboost[4];
+bool boosting[4];
+
 float eatTime = 0;
 
 struct EnemyThreadArgs
@@ -27,6 +32,7 @@ struct EnemyThreadArgs
     int &enemyY;
     int (*maze)[32];
     int &speed;
+    int &i;
 };
 
 struct PlayerThreadArgs
@@ -50,12 +56,13 @@ struct collisionThreadArgs
     int &speed;
 };
 
-void drawMaze(sf::RenderWindow &window, int maze[29][32], sf::RectangleShape &wall, sf::CircleShape &food, sf::Sprite (&cherry)[4])
+void drawMaze(sf::RenderWindow &window, int maze[29][32], sf::RectangleShape &wall, sf::CircleShape &food, sf::Sprite (&cherry)[4], sf::Sprite (&boost)[2])
 {
     pthread_mutex_lock(&mtx);
     window.clear(sf::Color::Black);
 
     int count = 0;
+    int boostcount = 0;
 
     for (int y = 0; y < 29; y++)
     {
@@ -76,6 +83,12 @@ void drawMaze(sf::RenderWindow &window, int maze[29][32], sf::RectangleShape &wa
                 cherry[count].setPosition(x * 20.f + 5.f, y * 20.f + 5.f);
                 window.draw(cherry[count]);
                 count++;
+            }
+            else if (maze[y][x] == 4)
+            {
+                boost[boostcount].setPosition(x * 20.f + 5.f, y * 20.f + 5.f);
+                window.draw(boost[boostcount]);
+                boostcount++;
             }
         }
     }
@@ -110,22 +123,22 @@ void *movePlayer(void *arg)
 
         if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
         {
-            if (pacmanY > 0 && (maze[pacmanY - 1][pacmanX] == 1 || maze[pacmanY - 1][pacmanX] == 2 || maze[pacmanY - 1][pacmanX] == 3))
+            if (pacmanY > 0 && (maze[pacmanY - 1][pacmanX] == 1 || maze[pacmanY - 1][pacmanX] == 2 || maze[pacmanY - 1][pacmanX] == 3 || maze[pacmanY - 1][pacmanX] == 4))
                 pacmanY--;
         }
         else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
         {
-            if (pacmanY < 28 && (maze[pacmanY + 1][pacmanX] == 1 || maze[pacmanY + 1][pacmanX] == 2 || maze[pacmanY + 1][pacmanX] == 3))
+            if (pacmanY < 28 && (maze[pacmanY + 1][pacmanX] == 1 || maze[pacmanY + 1][pacmanX] == 2 || maze[pacmanY + 1][pacmanX] == 3 || maze[pacmanY - 1][pacmanX] == 4))
                 pacmanY++;
         }
         else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
         {
-            if (pacmanX > 0 && (maze[pacmanY][pacmanX - 1] == 1 || maze[pacmanY][pacmanX - 1] == 2 || maze[pacmanY][pacmanX - 1] == 3))
+            if (pacmanX > 0 && (maze[pacmanY][pacmanX - 1] == 1 || maze[pacmanY][pacmanX - 1] == 2 || maze[pacmanY][pacmanX - 1] == 3 || maze[pacmanY - 1][pacmanX] == 4))
                 pacmanX--;
         }
         else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
         {
-            if (pacmanX < 32 && (maze[pacmanY][pacmanX + 1] == 1 || maze[pacmanY][pacmanX + 1] == 2 || maze[pacmanY][pacmanX + 1] == 3))
+            if (pacmanX < 32 && (maze[pacmanY][pacmanX + 1] == 1 || maze[pacmanY][pacmanX + 1] == 2 || maze[pacmanY][pacmanX + 1] == 3 || maze[pacmanY - 1][pacmanX] == 4))
                 pacmanX++;
         }
 
@@ -199,9 +212,27 @@ void *updateScore(void *arg)
             score += 10;
             ifcherry = true;
         }
-        else if (maze[pacmanY][pacmanX] == 4)
+    }
+}
+
+void *updateEnemyBoost(void *arg)
+{
+    EnemyThreadArgs *args = static_cast<EnemyThreadArgs *>(arg);
+
+    int &enemyX = args->enemyX;
+    int &enemyY = args->enemyY;
+    int(*maze)[32] = args->maze;
+    int &speed = args->speed;
+    int &i = args->i;
+
+    while (true)
+    {
+
+        if (maze[enemyY][enemyX] == 4)
         {
-            maze[pacmanY][pacmanX] = 4;
+            maze[enemyY][enemyX] = 1;
+            ifboost[i] = true;
+            boostTime[i] = 3;
         }
     }
 }
@@ -227,6 +258,7 @@ void *teleportEnemy(void *arg)
 
     if (maze[enemyX][enemyY] == 4)
         enemySpeed += 10;
+
     if (enemyX < 1)
     {
         enemyX = 14;
@@ -324,13 +356,14 @@ void *GameEngine(void *arg)
     sf::FloatRect bounds = pacmanSprite.getLocalBounds();
     pacmanSprite.setOrigin(bounds.width / 3.f, bounds.height / 3.f);
 
-    sf::Texture redghost, blueghost, pinkghost, greenghost, eatenGhost, cherry;
+    sf::Texture redghost, blueghost, pinkghost, greenghost, eatenGhost, cherry, boost;
     redghost.loadFromFile("ghost1.png");
     blueghost.loadFromFile("ghost3.png");
     pinkghost.loadFromFile("ghost4.png");
     greenghost.loadFromFile("ghost2.png");
     eatenGhost.loadFromFile("eatenghost.png");
     cherry.loadFromFile("cherry.png");
+    boost.loadFromFile("fireBoost.png");
 
     sf::Sprite cherrysprite[4];
     for (int i = 0; i < 4; i++)
@@ -341,6 +374,17 @@ void *GameEngine(void *arg)
 
         sf::FloatRect bounds = cherrysprite[i].getLocalBounds();
         cherrysprite[i].setOrigin(bounds.width / 3.f, bounds.height / 3.f);
+    }
+
+    sf::Sprite enemyboost[2];
+    for (int i = 0; i < 4; i++)
+    {
+
+        enemyboost[i].setTexture(boost);
+        enemyboost[i].setScale(0.02f, 0.02f);
+
+        sf::FloatRect bounds = enemyboost[i].getLocalBounds();
+        enemyboost[i].setOrigin(bounds.width / 3.f, bounds.height / 3.f);
     }
 
     sf::Sprite redsprite(redghost), bluesprite(blueghost), pinksprite(pinkghost), greensprite(greenghost);
@@ -369,7 +413,7 @@ void *GameEngine(void *arg)
         {0, 2, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 2, 0},
         {0, 2, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 2, 0},
         {0, 2, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 2, 0},
-        {0, 2, 0, 0, 2, 0, 0, 0, 0, 3, 0, 0, 2, 0, 1, 1, 1, 1, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 2, 0},
+        {0, 2, 0, 0, 2, 0, 0, 0, 0, 3, 0, 0, 2, 0, 5, 5, 5, 5, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 2, 0},
         {2, 2, 2, 2, 2, 2, 2, 0, 0, 2, 0, 0, 2, 0, 1, 1, 1, 1, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 2, 2, 2},
         {0, 0, 0, 0, 0, 0, 2, 0, 0, 3, 0, 0, 2, 0, 1, 1, 1, 1, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0},
         {0, 0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 0, 0, 2, 0, 0, 0},
@@ -395,13 +439,20 @@ void *GameEngine(void *arg)
     int score = 0;
     int lives = 3;
 
-    int enemyX1 = 14, enemyY1 = 12, speed1 = 100;
-    int enemyX2 = 17, enemyY2 = 12, speed2 = 200;
-    int enemyX3 = 14, enemyY3 = 13, speed3 = 200;
-    int enemyX4 = 17, enemyY4 = 13, speed4 = 100;
+    int enemyX1 = 14, enemyY1 = 12, speed1 = 200, boost1 = 0;
+    int enemyX2 = 17, enemyY2 = 12, speed2 = 250, boost2 = 0;
+    int enemyX3 = 14, enemyY3 = 13, speed3 = 250, boost3 = 0;
+    int enemyX4 = 17, enemyY4 = 13, speed4 = 200, boost4 = 0;
+
+    for (int i = 0; i < 4; i++)
+    {
+        ifboost[i] = false;
+        boosting[i] = false;
+    }
 
     pthread_t player_id, Score_id;
     pthread_t t_id1, t_id2, t_id3, t_id4;
+    pthread_t boost_id[4];
     pthread_t teleport_id1, teleport_id2, teleport_id3, teleport_id4;
     pthread_t collision_id1, collision_id2, collision_id3, collision_id4;
 
@@ -416,15 +467,14 @@ void *GameEngine(void *arg)
 
     pthread_create(&Score_id, NULL, updateScore, &playerArgs);
 
-    EnemyThreadArgs enemyArgs1 = {enemyX1, enemyY1, maze, speed1};
-    EnemyThreadArgs enemyArgs2 = {enemyX2, enemyY2, maze, speed2};
-    EnemyThreadArgs enemyArgs3 = {enemyX3, enemyY3, maze, speed3};
-    EnemyThreadArgs enemyArgs4 = {enemyX4, enemyY4, maze, speed4};
+    int one = 1, two = 2, three = 3, four = 4;
+    EnemyThreadArgs enemyArgs[4] = {{enemyX1, enemyY1, maze, speed1, one},
+                                    {enemyX2, enemyY2, maze, speed2, two},
+                                    {enemyX3, enemyY3, maze, speed3, three},
+                                    {enemyX4, enemyY4, maze, speed4, four}};
 
-    pthread_create(&t_id1, NULL, moveEnemy, &enemyArgs1);
-    pthread_create(&t_id2, NULL, moveEnemy, &enemyArgs2);
-    pthread_create(&t_id3, NULL, moveEnemy, &enemyArgs3);
-    pthread_create(&t_id4, NULL, moveEnemy, &enemyArgs4);
+    for (int i = 0; i < 4; i++)
+        pthread_create(&t_id1, NULL, moveEnemy, &enemyArgs[i]);
 
     pthread_create(&collision_id1, NULL, checkCollision, &collisionArgs1);
     pthread_create(&collision_id2, NULL, checkCollision, &collisionArgs2);
@@ -518,9 +568,11 @@ void *GameEngine(void *arg)
         }
         if (gameStarted)
         {
+
             if (lives == 0)
                 window.close();
-            drawMaze(window, maze, wall, food, cherrysprite);
+
+            drawMaze(window, maze, wall, food, cherrysprite, enemyboost);
 
             if (ifcherry)
             {
@@ -561,10 +613,60 @@ void *GameEngine(void *arg)
             drawEnemy(window, pinksprite, enemyX3, enemyY3);
             drawEnemy(window, greensprite, enemyX4, enemyY4);
 
-            pthread_create(&teleport_id1, NULL, teleportEnemy, &enemyArgs1);
-            pthread_create(&teleport_id2, NULL, teleportEnemy, &enemyArgs2);
-            pthread_create(&teleport_id3, NULL, teleportEnemy, &enemyArgs3);
-            pthread_create(&teleport_id4, NULL, teleportEnemy, &enemyArgs4);
+            for (int i = 0; i < 4; i++)
+                pthread_create(&boost_id[i], NULL, updateEnemyBoost, &enemyArgs[i]);
+
+            for (int i = 0; i < 4; i++)
+                pthread_create(&teleport_id1, NULL, teleportEnemy, &enemyArgs[i]);
+
+            for (int i = 0; i < 4; i++)
+            {
+                if (ifboost[i])
+                {
+                    if (i == 0)
+                    {
+                        speed1 -= 30;
+                    }
+                    else if (i == 1)
+                    {
+                        speed1 -= 30;
+                    }
+                    else if (i == 2)
+                    {
+                        speed1 -= 30;
+                    }
+                    else if (i == 3)
+                    {
+                        speed1 -= 30;
+                    }
+
+                    ifboost[i] = false;
+                    boosting[i] = true;
+                    boostTime[i] = clock.getElapsedTime().asSeconds() + 3;
+                }
+
+                if (boosting[i] && clock.getElapsedTime().asSeconds() >= boostTime[i])
+                {
+                    boosting[i] = false;
+
+                    if (i == 0)
+                    {
+                        speed1 += 30;
+                    }
+                    else if (i == 1)
+                    {
+                        speed1 += 30;
+                    }
+                    else if (i == 2)
+                    {
+                        speed1 += 30;
+                    }
+                    else if (i == 3)
+                    {
+                        speed1 += 30;
+                    }
+                }
+            }
 
             text.setString("Score: " + std::to_string(score));
             text1.setString("Lives : " + std::to_string(lives));
@@ -587,10 +689,8 @@ void *GameEngine(void *arg)
         {
             window.clear(sf::Color::Black);
 
-            // Draw background image
             window.draw(backgroundSprite);
 
-            // Draw menu text
             window.draw(menuText);
             window.draw(menuText1);
             window.display();
